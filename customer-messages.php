@@ -13,16 +13,9 @@ if ($user_id <= 0) {
     exit;
 }
 
-// First, get distinct baker_ids from chat_messages
-$debug_query = mysqli_query($conn, "SELECT DISTINCT baker_id FROM chat_messages WHERE user_id = $user_id");
-$chat_baker_ids = [];
-while ($row = mysqli_fetch_assoc($debug_query)) {
-    $chat_baker_ids[] = $row['baker_id'];
-}
-
-// Now get the full data with JOIN
+// Get bakers with chat history - using profile_image column
 $query = mysqli_query($conn, "
-    SELECT DISTINCT b.baker_id, b.shop_name, b.shop_image,
+    SELECT DISTINCT b.baker_id, b.shop_name, b.profile_image,
         (SELECT message FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_message,
         (SELECT created_at FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_time
     FROM chat_messages cm
@@ -33,7 +26,6 @@ $query = mysqli_query($conn, "
 ");
 
 $bakers = [];
-$query_error = mysqli_error($conn);
 
 if ($query) {
     while ($row = mysqli_fetch_assoc($query)) {
@@ -49,20 +41,12 @@ if ($query) {
         $bakers[] = [
             "baker_id" => (int)$row['baker_id'],
             "shop_name" => $row['shop_name'] ?? "Baker",
-            "shop_image" => $row['shop_image'] ?? "",
+            "shop_image" => $row['profile_image'] ?? "",
             "last_message" => $row['last_message'] ?? "Click to open chat",
             "last_message_time" => $timeAgo
         ];
     }
 }
 
-echo json_encode([
-    "status" => "success",
-    "bakers" => $bakers,
-    "debug" => [
-        "user_id" => $user_id,
-        "chat_baker_ids" => $chat_baker_ids,
-        "query_error" => $query_error
-    ]
-]);
+echo json_encode(["status" => "success", "bakers" => $bakers]);
 ?>

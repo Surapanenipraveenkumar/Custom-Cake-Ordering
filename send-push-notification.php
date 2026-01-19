@@ -4,33 +4,21 @@
  * Uses service account authentication for sending push notifications
  */
 
-// FCM Configuration
-define('FCM_PROJECT_ID', 'cake-ordering-app-30429');
-define('FCM_SERVICE_ACCOUNT_FILE', __DIR__ . '/firebase-service-account.json');
+// Include Firebase configuration
+require_once 'firebase-config.php';
 
 /**
  * Get OAuth2 access token for FCM v1 API
  */
 function getAccessToken() {
-    if (!file_exists(FCM_SERVICE_ACCOUNT_FILE)) {
-        error_log("FCM: Service account file not found");
-        return null;
-    }
-    
-    $serviceAccount = json_decode(file_get_contents(FCM_SERVICE_ACCOUNT_FILE), true);
-    if (!$serviceAccount) {
-        error_log("FCM: Invalid service account JSON");
-        return null;
-    }
-    
     // Create JWT header
     $header = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
     
     // Create JWT claims
     $now = time();
     $claims = [
-        'iss' => $serviceAccount['client_email'],
-        'sub' => $serviceAccount['client_email'],
+        'iss' => FIREBASE_CLIENT_EMAIL,
+        'sub' => FIREBASE_CLIENT_EMAIL,
         'aud' => 'https://oauth2.googleapis.com/token',
         'iat' => $now,
         'exp' => $now + 3600,
@@ -42,7 +30,7 @@ function getAccessToken() {
     $signatureInput = str_replace(['+', '/', '='], ['-', '_', ''], $header) . '.' . 
                       str_replace(['+', '/', '='], ['-', '_', ''], $payload);
     
-    $privateKey = openssl_pkey_get_private($serviceAccount['private_key']);
+    $privateKey = openssl_pkey_get_private(FIREBASE_PRIVATE_KEY);
     if (!$privateKey) {
         error_log("FCM: Invalid private key");
         return null;
@@ -63,7 +51,8 @@ function getAccessToken() {
             'assertion' => $jwt
         ]),
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded']
+        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+        CURLOPT_TIMEOUT => 30
     ]);
     
     $response = curl_exec($ch);
@@ -126,7 +115,7 @@ function sendPushNotification($fcmToken, $title, $body, $data = []) {
     
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_URL => 'https://fcm.googleapis.com/v1/projects/' . FCM_PROJECT_ID . '/messages:send',
+        CURLOPT_URL => 'https://fcm.googleapis.com/v1/projects/' . FIREBASE_PROJECT_ID . '/messages:send',
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode($message),
         CURLOPT_RETURNTRANSFER => true,
@@ -307,5 +296,55 @@ function sendToAllUsers($conn, $userType, $title, $body, $data = []) {
     }
     
     return $count;
+}
+
+/**
+ * Notify all online delivery partners about a new delivery order
+ * @param mysqli $conn Database connection
+ * @param int $orderId Order ID
+ * @param string $shopName Baker's shop name
+ * @return array Count of in-app and FCM notifications sent
+ */
+function notifyNewDeliveryOrder($conn, $orderId, $shopName) {
+    $results = ['in_app' => 0, 'fcm' => 0];
+    
+    // Check which delivery table exists
+    $check_partners = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
+    $delivery_table = ($check_partners && mysqli_num_rows($check_partners) > 0) ? 'delivery_partners' : 'delivery_persons';
+    
+    // Get all online delivery partners
+    $result = mysqli_query($conn, "SELECT delivery_id, name, fcm_token FROM $delivery_table WHERE is_online = 1");
+    
+    if (!$result) {
+        error_log("notifyNewDeliveryOrder: Query failed: " . mysqli_error($conn));
+        return $results;
+    }
+    
+    $title = "New Delivery Available! 🛵";
+    $message = "Order #$orderId from $shopName is ready for pickup!";
+    $title_esc = mysqli_real_escape_string($conn, $title);
+    $msg_esc = mysqli_real_escape_string($conn, $message);
+    
+    while ($row = mysqli_fetch_assoc($result)) {
+        $delivery_id = intval($row['delivery_id']);
+        $fcm_token = $row['fcm_token'] ?? '';
+        
+        // Insert in-app notification
+        $notif_query = "INSERT INTO notifications (user_type, user_id, type, title, message, order_id) 
+                       VALUES ('delivery', $delivery_id, 'new_delivery', '$title_esc', '$msg_esc', $orderId)";
+        if (mysqli_query($conn, $notif_query)) {
+            $results['in_app']++;
+        }
+        
+        // Send FCM push notification
+        if (!empty($fcm_token)) {
+            if (sendPushNotification($fcm_token, $title, $message, ['type' => 'new_delivery', 'order_id' => strval($orderId)])) {
+                $results['fcm']++;
+            }
+        }
+    }
+    
+    error_log("notifyNewDeliveryOrder: Sent {$results['in_app']} in-app and {$results['fcm']} FCM notifications");
+    return $results;
 }
 ?>

@@ -6,13 +6,6 @@ header("Access-Control-Allow-Origin: *");
 
 include "db.php";
 
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-
-if ($user_id <= 0) {
-    echo json_encode(["status" => "error", "message" => "user_id required"]);
-    exit;
-}
-
 // Create table if not exists
 mysqli_query($conn, "
     CREATE TABLE IF NOT EXISTS chat_messages (
@@ -27,8 +20,14 @@ mysqli_query($conn, "
     )
 ");
 
-// Get bakers with chat history
-$query = "
+$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
+
+if ($user_id <= 0) {
+    echo json_encode(["status" => "error", "message" => "user_id required"]);
+    exit;
+}
+
+$query = mysqli_query($conn, "
     SELECT DISTINCT b.baker_id, b.shop_name, b.shop_image,
         (SELECT message FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_message,
         (SELECT created_at FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_time
@@ -37,17 +36,16 @@ $query = "
     WHERE cm.user_id = $user_id
     GROUP BY b.baker_id
     ORDER BY last_time DESC
-";
+");
 
-$result = mysqli_query($conn, $query);
 $bakers = [];
-
-if ($result) {
-    while ($row = mysqli_fetch_assoc($result)) {
-        $timeAgo = "2m ago";
+if ($query) {
+    while ($row = mysqli_fetch_assoc($query)) {
+        $timeAgo = "";
         if ($row['last_time']) {
             $diff = time() - strtotime($row['last_time']);
-            if ($diff < 3600) $timeAgo = floor($diff/60) . "m ago";
+            if ($diff < 60) $timeAgo = "Just now";
+            elseif ($diff < 3600) $timeAgo = floor($diff/60) . "m ago";
             elseif ($diff < 86400) $timeAgo = floor($diff/3600) . "h ago";
             else $timeAgo = floor($diff/86400) . "d ago";
         }

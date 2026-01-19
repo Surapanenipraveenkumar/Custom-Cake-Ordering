@@ -13,7 +13,6 @@ if ($user_id <= 0) {
     exit;
 }
 
-// Get bakers with chat history - using profile_image column
 $query = mysqli_query($conn, "
     SELECT DISTINCT b.baker_id, b.shop_name, b.profile_image,
         (SELECT message FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_message,

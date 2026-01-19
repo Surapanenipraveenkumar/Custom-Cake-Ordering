@@ -1,5 +1,6 @@
 <?php
 header("Content-Type: application/json");
+header("Access-Control-Allow-Origin: *");
 include "db.php";
 
 $delivery_id = $_GET['delivery_id'] ?? null;
@@ -14,19 +15,15 @@ if (!$delivery_id) {
 
 $delivery_id = mysqli_real_escape_string($conn, $delivery_id);
 
-// Check if delivery_persons table exists
-$tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_persons'");
-if (mysqli_num_rows($tableCheck) == 0) {
-    echo json_encode([
-        "status" => "error",
-        "message" => "Delivery person not found"
-    ]);
-    exit;
-}
+// Check which delivery table exists - match set-for-delivery.php logic
+$table_check = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
+$delivery_table = ($table_check && mysqli_num_rows($table_check) > 0) ? 'delivery_partners' : 'delivery_persons';
+
+error_log("delivery-dashboard: Using table $delivery_table for delivery_id=$delivery_id");
 
 // Get delivery person info
-$deliveryQuery = mysqli_query($conn, "SELECT * FROM delivery_persons WHERE delivery_id = '$delivery_id'");
-if (mysqli_num_rows($deliveryQuery) == 0) {
+$deliveryQuery = mysqli_query($conn, "SELECT * FROM $delivery_table WHERE delivery_id = '$delivery_id'");
+if (!$deliveryQuery || mysqli_num_rows($deliveryQuery) == 0) {
     echo json_encode([
         "status" => "error",
         "message" => "Delivery person not found"

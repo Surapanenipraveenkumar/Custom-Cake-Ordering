@@ -11,10 +11,10 @@ require_once 'firebase-config.php';
  * Get OAuth2 access token for FCM v1 API
  */
 function getAccessToken() {
-    // Create JWT header
-    $header = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    // Create JWT header (URL-safe base64)
+    $header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT'])));
     
-    // Create JWT claims
+    // Create JWT claims (URL-safe base64)
     $now = time();
     $claims = [
         'iss' => FIREBASE_CLIENT_EMAIL,
@@ -24,11 +24,10 @@ function getAccessToken() {
         'exp' => $now + 3600,
         'scope' => 'https://www.googleapis.com/auth/firebase.messaging'
     ];
-    $payload = base64_encode(json_encode($claims));
+    $payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode(json_encode($claims)));
     
-    // Create signature
-    $signatureInput = str_replace(['+', '/', '='], ['-', '_', ''], $header) . '.' . 
-                      str_replace(['+', '/', '='], ['-', '_', ''], $payload);
+    // Create signature input (already URL-safe)
+    $signatureInput = $header . '.' . $payload;
     
     $privateKey = openssl_pkey_get_private(FIREBASE_PRIVATE_KEY);
     if (!$privateKey) {

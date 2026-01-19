@@ -1,35 +1,100 @@
 <?php
 // firebase-config.php
-// Firebase Service Account Configuration
+// Firebase Cloud Messaging configuration using service account
 
-define('FIREBASE_PROJECT_ID', 'cake-ordering-app-30429');
-define('FIREBASE_CLIENT_EMAIL', 'firebase-adminsdk-fbsvc@cake-ordering-app-30429.iam.gserviceaccount.com');
-define('FIREBASE_PRIVATE_KEY', '-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD5km57jfRLbw6i
-eQbpISkrdCcGH1u9lr98dmjOr4aut76rEQRqGrvjyq+jdVjT/zlnuc3IWepN0Bc6
-nppJM5fD6WskfmbiQGLzWQzN7Sz1JLhZW/gDb8fGOURfNCkVL0V9UCF4I9Xi+n89
-GEoK5pV9G0pcojC8vW/O2nv01cCn/BzAYUq1uOQtKiikHCkn75oW4XkIaaDJxyu6
-vWIIarigevCnZ7YU4h1mWopa5Ik0ngqYBiEMyTpQgRpLAIf5wr1egz6qu5M83WFE
-KWDQ4kkjrFMR4NGsbSClVMrqf6qe4D9mTj7bZMEpLKW6TVUzK7rKauWdEPcCX0kz
-Y06DXMPvAgMBAAECggEADTW/GFYd5kV1S/J5BBHHxckkbNjWRWI7aRSbA2AO3z4F
-kk6lYhJflWgu9/yoArMH/SGi4hlBFo5OdHSQEqwJVL4M3qxVuMff4b6TnjpdsboY
-WE6CAavC5Y8DCFqdinjRxkpdnMGhoOqE0QO+NsNLiiKaj7p1nVl8ZHTaSjRrbQvt
-6iT2WaLeDRv/ExAC8T9zjlBUnic6/Aw+y/55AphgSJmjMIklMukfwzYBODuyy6Ys
-gvyw6hrE07417mBUGlJ07o3wgV0wQfeNeFCws6tjBxXJZG1s/0x+AQWO1B/X+92J
-Kda8PkYHnvPOJKW2qfi2pKgVLZDQqfQEH74k8EBhpQKBgQD+lTevpoU6DmurlHLa
-VeaZZ0ug6peZN0a/Bx42G/fKNOKB9/+XTdOz2hd5FoXcz1M2+mVMyVT8puHjnyjo
-UdSbNzrSiHrd3qknGI1yTgCFHvKCa5DT2z06qaXbQls3LMGQrCWkhB3Nm0axmgwg
-Fijt9dpCt+wpew38kJN0gFW8VQKBgQD69hLRLQ83YTYDkc5mEexPO3i6c109kJ/+
-C4w0fJQih/+8hcY7qICBxf1a4sFLt0rMzLREgQ4UQNjlfmZrCozeyCiaeMCorYtM
-qqnqTsYGZwKAPro3InwDmPVX/Lmazy2vBFGkxJyeAh1H4EvxwEUXooNKfPhb8Kqk
-QpaXuAZDMwKBgQD5nFKSHWIpDzSQcae+3VSQ+k+Twg/LwP/TkuYTRY7Jqtqfdgob
-TsqQX/h92BB99KVxlUa3Z/u1EOcQJ+CTEJC1cwxwmjJl0cfmNlORTFuEKli6eT7y
-CdbZ6rZc6Y3H5lEPSUpLKOKT0ngY8KKM301YK6LJoc2iyi1nglWhd6cYVQKBgQDp
-YnxfYQsckl/b8/XBQHvFt2Xv5ydYAK55YB3UFeLhNh6jILkYc/yGMy0JH4VpN5zt
-VpVye54vQZsz2Ve/xgD5kaUI+rEYbMP12WTJDNblz1gpEay1Z3FzGwVW/SVSjcdL
-UrXmiB2qaAb49+NIgGkAsNZuKEgDoI3g0jggAjh4twKBgF1JjAeIhgTmdSJY5ka8
-fMVyB/GveTrZMeXcMvGjVoPy7hw0HlRAWuF09OhlvJKASVtUYbancbetSYwSL1Gc
-wbeWPdbBI92QbLMDWL7/Uhw2H5IkGrgwy9cSIgb8jX3HBH0vvTjeMbc8z77w5USn
-WeGGiFLBIDpIrFhwytIK9s6P
------END PRIVATE KEY-----');
+// Load service account credentials
+$serviceAccountPath = __DIR__ . '/firebase-service-account.json';
+
+if (file_exists($serviceAccountPath)) {
+    $serviceAccount = json_decode(file_get_contents($serviceAccountPath), true);
+    
+    // Define Firebase constants
+    define('FIREBASE_PROJECT_ID', $serviceAccount['project_id'] ?? '');
+    define('FIREBASE_PRIVATE_KEY', $serviceAccount['private_key'] ?? '');
+    define('FIREBASE_CLIENT_EMAIL', $serviceAccount['client_email'] ?? '');
+    define('FIREBASE_TOKEN_URI', $serviceAccount['token_uri'] ?? 'https://oauth2.googleapis.com/token');
+} else {
+    // Fallback - define empty constants
+    define('FIREBASE_PROJECT_ID', '');
+    define('FIREBASE_PRIVATE_KEY', '');
+    define('FIREBASE_CLIENT_EMAIL', '');
+    define('FIREBASE_TOKEN_URI', 'https://oauth2.googleapis.com/token');
+}
+
+/**
+ * Generate a JWT token for Firebase authentication
+ */
+function generateJWT() {
+    $header = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    
+    $now = time();
+    $payload = base64_encode(json_encode([
+        'iss' => FIREBASE_CLIENT_EMAIL,
+        'sub' => FIREBASE_CLIENT_EMAIL,
+        'aud' => FIREBASE_TOKEN_URI,
+        'iat' => $now,
+        'exp' => $now + 3600,
+        'scope' => 'https://www.googleapis.com/auth/firebase.messaging'
+    ]));
+    
+    $signatureInput = str_replace(['+', '/', '='], ['-', '_', ''], $header) . '.' . 
+                      str_replace(['+', '/', '='], ['-', '_', ''], $payload);
+    
+    // Sign with private key
+    $privateKey = openssl_pkey_get_private(FIREBASE_PRIVATE_KEY);
+    if (!$privateKey) {
+        error_log("FCM: Failed to parse private key");
+        return null;
+    }
+    
+    openssl_sign($signatureInput, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+    $signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
+    
+    return $signatureInput . '.' . $signature;
+}
+
+/**
+ * Get OAuth2 access token for Firebase
+ */
+function getAccessToken() {
+    static $cachedToken = null;
+    static $tokenExpiry = 0;
+    
+    // Return cached token if still valid
+    if ($cachedToken && time() < $tokenExpiry - 60) {
+        return $cachedToken;
+    }
+    
+    $jwt = generateJWT();
+    if (!$jwt) {
+        return null;
+    }
+    
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => FIREBASE_TOKEN_URI,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query([
+            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion' => $jwt
+        ]),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+        CURLOPT_TIMEOUT => 30
+    ]);
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($httpCode == 200) {
+        $data = json_decode($response, true);
+        $cachedToken = $data['access_token'] ?? null;
+        $tokenExpiry = time() + ($data['expires_in'] ?? 3600);
+        return $cachedToken;
+    }
+    
+    error_log("FCM: Failed to get access token. HTTP $httpCode: $response");
+    return null;
+}
 ?>

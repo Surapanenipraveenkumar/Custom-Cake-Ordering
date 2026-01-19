@@ -22,6 +22,7 @@ try {
 
 // Use db.php for connection
 include "db.php";
+include_once "send-push-notification.php";
 
 if (!$conn) {
     echo json_encode(["status" => "error", "message" => "Database connection failed"]);

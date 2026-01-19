@@ -1,8 +1,7 @@
 <?php
-// customer-messages.php
-// Get list of bakers the customer has ACTUALLY chatted with
+// customer-messages.php - Get bakers customer has chatted with
 
-header("Content-Type: application/json; charset=UTF-8");
+header("Content-Type: application/json");
 header("Access-Control-Allow-Origin: *");
 
 include "db.php";
@@ -14,57 +13,43 @@ if ($user_id <= 0) {
     exit;
 }
 
-// Create chat_messages table if it doesn't exist
+// Create table if not exists
 mysqli_query($conn, "
-    CREATE TABLE IF NOT EXISTS `chat_messages` (
-        `message_id` INT AUTO_INCREMENT PRIMARY KEY,
-        `baker_id` INT NOT NULL,
-        `user_id` INT NOT NULL,
-        `sender_type` ENUM('customer', 'baker') NOT NULL,
-        `message` TEXT,
-        `image_url` VARCHAR(255),
-        `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX `idx_baker_user` (`baker_id`, `user_id`),
-        INDEX `idx_created` (`created_at`)
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        message_id INT AUTO_INCREMENT PRIMARY KEY,
+        baker_id INT NOT NULL,
+        user_id INT NOT NULL,
+        sender_type ENUM('customer', 'baker') NOT NULL,
+        message TEXT,
+        image_url VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_baker_user (baker_id, user_id)
     )
 ");
 
-// Get bakers that this customer has actually chatted with
+// Get bakers with chat history
 $query = "
-    SELECT 
-        b.baker_id,
-        b.shop_name,
-        b.shop_image,
-        cm.message as last_message,
-        cm.created_at as last_time
-    FROM (
-        SELECT baker_id, MAX(message_id) as max_id
-        FROM chat_messages 
-        WHERE user_id = $user_id
-        GROUP BY baker_id
-    ) latest
-    INNER JOIN chat_messages cm ON cm.message_id = latest.max_id
-    INNER JOIN bakers b ON b.baker_id = latest.baker_id
-    ORDER BY cm.created_at DESC
+    SELECT DISTINCT b.baker_id, b.shop_name, b.shop_image,
+        (SELECT message FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_message,
+        (SELECT created_at FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_time
+    FROM chat_messages cm
+    JOIN bakers b ON cm.baker_id = b.baker_id
+    WHERE cm.user_id = $user_id
+    GROUP BY b.baker_id
+    ORDER BY last_time DESC
 ";
 
 $result = mysqli_query($conn, $query);
-
 $bakers = [];
-if ($result && mysqli_num_rows($result) > 0) {
+
+if ($result) {
     while ($row = mysqli_fetch_assoc($result)) {
-        // Calculate time ago
-        $msgTime = strtotime($row['last_time']);
-        $diff = time() - $msgTime;
-        
-        if ($diff < 60) {
-            $timeAgo = "Just now";
-        } elseif ($diff < 3600) {
-            $timeAgo = floor($diff / 60) . "m ago";
-        } elseif ($diff < 86400) {
-            $timeAgo = floor($diff / 3600) . "h ago";
-        } else {
-            $timeAgo = floor($diff / 86400) . "d ago";
+        $timeAgo = "2m ago";
+        if ($row['last_time']) {
+            $diff = time() - strtotime($row['last_time']);
+            if ($diff < 3600) $timeAgo = floor($diff/60) . "m ago";
+            elseif ($diff < 86400) $timeAgo = floor($diff/3600) . "h ago";
+            else $timeAgo = floor($diff/86400) . "d ago";
         }
         
         $bakers[] = [
@@ -77,10 +62,5 @@ if ($result && mysqli_num_rows($result) > 0) {
     }
 }
 
-echo json_encode([
-    "status" => "success",
-    "bakers" => $bakers
-]);
-
-mysqli_close($conn);
+echo json_encode(["status" => "success", "bakers" => $bakers]);
 ?>

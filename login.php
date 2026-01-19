@@ -3,16 +3,18 @@ header("Content-Type: application/json");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST");
 header("Access-Control-Allow-Headers: Content-Type");
+// Suppress PHP warnings
 error_reporting(0);
+header("Content-Type: application/json");
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST");
+header("Access-Control-Allow-Headers: Content-Type");
 
-$host = "localhost";
-$user = "root";
-$pass = "";
-$db   = "custom-cake";
+include "db.php";
 
-$conn = new mysqli($host, $user, $pass, $db);
-
-if ($conn->connect_error) {
+// Check if connection was successful (db.php handles error output usually, but let's be safe)
+if (!isset($conn) || $conn->connect_error) {
+    // db.php might have already output error and exited, but if not:
     echo json_encode([
         "status" => "error",
         "message" => "Database connection failed"

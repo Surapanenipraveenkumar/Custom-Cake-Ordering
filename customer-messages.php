@@ -6,6 +6,20 @@ header("Access-Control-Allow-Origin: *");
 
 include "db.php";
 
+// Create table if not exists
+mysqli_query($conn, "
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        message_id INT AUTO_INCREMENT PRIMARY KEY,
+        baker_id INT NOT NULL,
+        user_id INT NOT NULL,
+        sender_type ENUM('customer', 'baker') NOT NULL,
+        message TEXT,
+        image_url VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_baker_user (baker_id, user_id)
+    )
+");
+
 $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 
 if ($user_id <= 0) {

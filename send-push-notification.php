@@ -163,7 +163,13 @@ function getFcmToken($conn, $userType, $userId) {
             $result = mysqli_query($conn, "SELECT fcm_token FROM bakers WHERE baker_id = $userId");
             break;
         case 'delivery':
-            $result = mysqli_query($conn, "SELECT fcm_token FROM delivery_persons WHERE delivery_id = $userId");
+            // Check which delivery table exists
+            $check_partners = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
+            if ($check_partners && mysqli_num_rows($check_partners) > 0) {
+                $result = mysqli_query($conn, "SELECT fcm_token FROM delivery_partners WHERE delivery_id = $userId");
+            } else {
+                $result = mysqli_query($conn, "SELECT fcm_token FROM delivery_persons WHERE delivery_id = $userId");
+            }
             break;
         default:
             return null;
@@ -274,7 +280,13 @@ function sendToAllUsers($conn, $userType, $title, $body, $data = []) {
             $result = mysqli_query($conn, "SELECT baker_id as id, fcm_token FROM bakers WHERE fcm_token IS NOT NULL AND fcm_token != ''");
             break;
         case 'delivery':
-            $result = mysqli_query($conn, "SELECT delivery_id as id, fcm_token FROM delivery_persons WHERE fcm_token IS NOT NULL AND fcm_token != ''");
+            // Check which delivery table exists
+            $check_partners = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
+            if ($check_partners && mysqli_num_rows($check_partners) > 0) {
+                $result = mysqli_query($conn, "SELECT delivery_id as id, fcm_token FROM delivery_partners WHERE fcm_token IS NOT NULL AND fcm_token != ''");
+            } else {
+                $result = mysqli_query($conn, "SELECT delivery_id as id, fcm_token FROM delivery_persons WHERE fcm_token IS NOT NULL AND fcm_token != ''");
+            }
             break;
         case 'all':
             // Send to all user types

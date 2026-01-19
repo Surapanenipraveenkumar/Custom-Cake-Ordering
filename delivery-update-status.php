@@ -104,6 +104,7 @@ switch ($action) {
         $message = "A delivery partner has been assigned to your order #$order_id";
         break;
         
+    case 'pickup':
     case 'picked_up':
         mysqli_query($conn, "UPDATE orders SET delivery_status = 'picked_up', status = 'out_for_delivery', picked_up_at = NOW() WHERE order_id = $order_id");
         
@@ -111,6 +112,7 @@ switch ($action) {
         $message = "Your order #$order_id has been picked up and is on the way!";
         break;
         
+    case 'deliver':
     case 'delivered':
         mysqli_query($conn, "UPDATE orders SET delivery_status = 'delivered', status = 'delivered', delivered_at = NOW() WHERE order_id = $order_id");
         

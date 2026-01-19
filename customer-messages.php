@@ -6,20 +6,6 @@ header("Access-Control-Allow-Origin: *");
 
 include "db.php";
 
-// Create table if not exists
-mysqli_query($conn, "
-    CREATE TABLE IF NOT EXISTS chat_messages (
-        message_id INT AUTO_INCREMENT PRIMARY KEY,
-        baker_id INT NOT NULL,
-        user_id INT NOT NULL,
-        sender_type ENUM('customer', 'baker') NOT NULL,
-        message TEXT,
-        image_url VARCHAR(255),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_baker_user (baker_id, user_id)
-    )
-");
-
 $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 
 if ($user_id <= 0) {
@@ -27,6 +13,14 @@ if ($user_id <= 0) {
     exit;
 }
 
+// First, get distinct baker_ids from chat_messages
+$debug_query = mysqli_query($conn, "SELECT DISTINCT baker_id FROM chat_messages WHERE user_id = $user_id");
+$chat_baker_ids = [];
+while ($row = mysqli_fetch_assoc($debug_query)) {
+    $chat_baker_ids[] = $row['baker_id'];
+}
+
+// Now get the full data with JOIN
 $query = mysqli_query($conn, "
     SELECT DISTINCT b.baker_id, b.shop_name, b.shop_image,
         (SELECT message FROM chat_messages WHERE user_id = $user_id AND baker_id = b.baker_id ORDER BY created_at DESC LIMIT 1) as last_message,
@@ -39,6 +33,8 @@ $query = mysqli_query($conn, "
 ");
 
 $bakers = [];
+$query_error = mysqli_error($conn);
+
 if ($query) {
     while ($row = mysqli_fetch_assoc($query)) {
         $timeAgo = "";
@@ -60,5 +56,13 @@ if ($query) {
     }
 }
 
-echo json_encode(["status" => "success", "bakers" => $bakers]);
+echo json_encode([
+    "status" => "success",
+    "bakers" => $bakers,
+    "debug" => [
+        "user_id" => $user_id,
+        "chat_baker_ids" => $chat_baker_ids,
+        "query_error" => $query_error
+    ]
+]);
 ?>

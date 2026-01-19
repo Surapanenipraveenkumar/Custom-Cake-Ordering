@@ -1,6 +1,6 @@
 <?php
 // customer-messages.php
-// Get list of bakers the customer has chatted with
+// Get list of bakers the customer has chatted with or ordered from
 
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Origin: *");
@@ -20,6 +20,7 @@ if (!$user_id) {
 }
 
 $user_id = intval($user_id);
+error_log("customer-messages: user_id=$user_id");
 
 // Create chat_messages table if it doesn't exist
 mysqli_query($conn, "
@@ -36,8 +37,10 @@ mysqli_query($conn, "
     )
 ");
 
-// Get distinct bakers the customer has messaged
-$query = "
+$bakers = [];
+
+// First, try to get bakers with chat messages
+$chatQuery = mysqli_query($conn, "
     SELECT DISTINCT 
         b.baker_id,
         b.shop_name,
@@ -47,55 +50,73 @@ $query = "
          ORDER BY cm.created_at DESC LIMIT 1) as last_message,
         (SELECT DATE_FORMAT(cm.created_at, '%h:%i %p') FROM chat_messages cm
          WHERE cm.user_id = $user_id AND cm.baker_id = b.baker_id
-         ORDER BY cm.created_at DESC LIMIT 1) as last_message_time,
-        (SELECT cm.created_at FROM chat_messages cm
-         WHERE cm.user_id = $user_id AND cm.baker_id = b.baker_id
-         ORDER BY cm.created_at DESC LIMIT 1) as last_message_date
+         ORDER BY cm.created_at DESC LIMIT 1) as last_message_time
     FROM chat_messages m
     JOIN bakers b ON m.baker_id = b.baker_id
     WHERE m.user_id = $user_id
     GROUP BY b.baker_id, b.shop_name, b.shop_image
-    ORDER BY last_message_date DESC
-";
+    ORDER BY (SELECT MAX(created_at) FROM chat_messages 
+              WHERE user_id = $user_id AND baker_id = b.baker_id) DESC
+");
 
-$result = mysqli_query($conn, $query);
-
-$bakers = [];
-if ($result) {
-    while ($row = mysqli_fetch_assoc($result)) {
+if ($chatQuery) {
+    while ($row = mysqli_fetch_assoc($chatQuery)) {
         $bakers[] = [
             "baker_id" => (int)$row['baker_id'],
             "shop_name" => $row['shop_name'] ?? "Baker",
             "shop_image" => $row['shop_image'] ?? "",
-            "last_message" => $row['last_message'] ?? "No messages yet",
+            "last_message" => $row['last_message'] ?? "Click to open chat",
             "last_message_time" => $row['last_message_time'] ?? ""
         ];
     }
-} else {
-    error_log("customer-messages.php error: " . mysqli_error($conn));
 }
 
-// If no chat messages, also include bakers from orders (so customer can start chat)
+error_log("customer-messages: Found " . count($bakers) . " bakers from chat");
+
+// If no chat messages, get bakers from orders
 if (empty($bakers)) {
+    error_log("customer-messages: No chats found, checking orders...");
+    
     $ordersQuery = mysqli_query($conn, "
-        SELECT DISTINCT b.baker_id, b.shop_name, b.shop_image
+        SELECT DISTINCT 
+            b.baker_id, 
+            b.shop_name, 
+            b.shop_image,
+            o.created_at as order_date
         FROM orders o
         JOIN bakers b ON o.baker_id = b.baker_id
         WHERE o.user_id = $user_id
         ORDER BY o.created_at DESC
-        LIMIT 10
+        LIMIT 20
     ");
     
     if ($ordersQuery) {
         while ($row = mysqli_fetch_assoc($ordersQuery)) {
+            // Calculate time ago
+            $orderTime = strtotime($row['order_date']);
+            $diff = time() - $orderTime;
+            
+            if ($diff < 60) {
+                $timeAgo = "Just now";
+            } elseif ($diff < 3600) {
+                $timeAgo = floor($diff / 60) . "m ago";
+            } elseif ($diff < 86400) {
+                $timeAgo = floor($diff / 3600) . "h ago";
+            } else {
+                $timeAgo = floor($diff / 86400) . "d ago";
+            }
+            
             $bakers[] = [
                 "baker_id" => (int)$row['baker_id'],
                 "shop_name" => $row['shop_name'] ?? "Baker",
                 "shop_image" => $row['shop_image'] ?? "",
-                "last_message" => "Start a conversation",
-                "last_message_time" => ""
+                "last_message" => "Click to open chat",
+                "last_message_time" => $timeAgo
             ];
         }
+        error_log("customer-messages: Found " . count($bakers) . " bakers from orders");
+    } else {
+        error_log("customer-messages: Orders query error: " . mysqli_error($conn));
     }
 }
 

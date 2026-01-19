@@ -1,14 +1,15 @@
 <?php
-header("Content-Type: application/json");
+// baker-message-customers.php
+// Get list of customers who have chatted with or ordered from a baker
 
-// Enable errors for debugging
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, POST");
+header("Access-Control-Allow-Headers: Content-Type");
 
 include "db.php";
 
-// Get baker_id from GET parameter
-$baker_id = $_GET['baker_id'] ?? null;
+$baker_id = $_GET['baker_id'] ?? $_POST['baker_id'] ?? null;
 
 if (!$baker_id) {
     echo json_encode([
@@ -18,88 +19,129 @@ if (!$baker_id) {
     exit;
 }
 
-$baker_id = mysqli_real_escape_string($conn, $baker_id);
+$baker_id = intval($baker_id);
+error_log("baker-message-customers: baker_id=$baker_id");
 
-// Check if chat_messages table exists, create if not
-$tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'chat_messages'");
-if (!$tableCheck || mysqli_num_rows($tableCheck) == 0) {
-    // Create the table
-    $createTable = "
-        CREATE TABLE IF NOT EXISTS `chat_messages` (
-            `message_id` INT AUTO_INCREMENT PRIMARY KEY,
-            `baker_id` INT NOT NULL,
-            `user_id` INT NOT NULL,
-            `sender_type` ENUM('customer', 'baker') NOT NULL,
-            `message` TEXT,
-            `image_url` VARCHAR(255),
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_baker_user` (`baker_id`, `user_id`),
-            INDEX `idx_created` (`created_at`)
-        )";
-    mysqli_query($conn, $createTable);
-}
-
-// Simpler query - just get unique users who have messaged this baker
-$query = mysqli_query($conn, "
-    SELECT DISTINCT
-        u.user_id,
-        u.name
-    FROM chat_messages cm
-    JOIN users u ON cm.user_id = u.user_id
-    WHERE cm.baker_id = '$baker_id'
-    GROUP BY u.user_id
+// Create chat_messages table if it doesn't exist
+mysqli_query($conn, "
+    CREATE TABLE IF NOT EXISTS `chat_messages` (
+        `message_id` INT AUTO_INCREMENT PRIMARY KEY,
+        `baker_id` INT NOT NULL,
+        `user_id` INT NOT NULL,
+        `sender_type` ENUM('customer', 'baker') NOT NULL,
+        `message` TEXT,
+        `image_url` VARCHAR(255),
+        `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX `idx_baker_user` (`baker_id`, `user_id`),
+        INDEX `idx_created` (`created_at`)
+    )
 ");
-
-if (!$query) {
-    echo json_encode([
-        "status" => "error",
-        "message" => "Query failed: " . mysqli_error($conn)
-    ]);
-    exit;
-}
 
 $customers = [];
 
-while ($row = mysqli_fetch_assoc($query)) {
-    // Get the last message for this customer
-    $lastMsgQuery = mysqli_query($conn, "
-        SELECT message, created_at, TIMESTAMPDIFF(MINUTE, created_at, NOW()) as minutes_ago
-        FROM chat_messages 
-        WHERE baker_id = '$baker_id' AND user_id = '{$row['user_id']}'
-        ORDER BY created_at DESC
-        LIMIT 1
+// First, try to get customers with chat messages
+$chatQuery = mysqli_query($conn, "
+    SELECT DISTINCT 
+        u.user_id,
+        u.name,
+        u.profile_image,
+        (SELECT cm.message FROM chat_messages cm
+         WHERE cm.baker_id = $baker_id AND cm.user_id = u.user_id
+         ORDER BY cm.created_at DESC LIMIT 1) as last_message,
+        (SELECT DATE_FORMAT(cm.created_at, '%h:%i %p') FROM chat_messages cm
+         WHERE cm.baker_id = $baker_id AND cm.user_id = u.user_id
+         ORDER BY cm.created_at DESC LIMIT 1) as last_message_time,
+        (SELECT cm.created_at FROM chat_messages cm
+         WHERE cm.baker_id = $baker_id AND cm.user_id = u.user_id
+         ORDER BY cm.created_at DESC LIMIT 1) as last_active
+    FROM chat_messages m
+    JOIN users u ON m.user_id = u.user_id
+    WHERE m.baker_id = $baker_id
+    GROUP BY u.user_id, u.name, u.profile_image
+    ORDER BY last_active DESC
+");
+
+if ($chatQuery) {
+    while ($row = mysqli_fetch_assoc($chatQuery)) {
+        // Calculate time ago
+        $lastActive = strtotime($row['last_active']);
+        $diff = time() - $lastActive;
+        
+        if ($diff < 60) {
+            $timeAgo = "Just now";
+        } elseif ($diff < 3600) {
+            $timeAgo = floor($diff / 60) . "m ago";
+        } elseif ($diff < 86400) {
+            $timeAgo = floor($diff / 3600) . "h ago";
+        } else {
+            $timeAgo = floor($diff / 86400) . "d ago";
+        }
+        
+        $customers[] = [
+            "user_id" => (int)$row['user_id'],
+            "name" => $row['name'] ?? "Customer",
+            "profile_image" => $row['profile_image'] ?? "",
+            "last_message" => $row['last_message'] ?? "Click to open chat",
+            "last_message_time" => $row['last_message_time'] ?? "",
+            "time_ago" => $timeAgo
+        ];
+    }
+}
+
+error_log("baker-message-customers: Found " . count($customers) . " customers from chat");
+
+// If no chat messages, get customers from orders
+if (empty($customers)) {
+    error_log("baker-message-customers: No chats found, checking orders...");
+    
+    $ordersQuery = mysqli_query($conn, "
+        SELECT DISTINCT 
+            u.user_id, 
+            u.name, 
+            u.profile_image,
+            o.created_at as order_date
+        FROM orders o
+        JOIN users u ON o.user_id = u.user_id
+        WHERE o.baker_id = $baker_id
+        ORDER BY o.created_at DESC
+        LIMIT 20
     ");
     
-    $lastMsg = mysqli_fetch_assoc($lastMsgQuery);
-    
-    // Calculate time ago
-    $minutes = (int)($lastMsg['minutes_ago'] ?? 0);
-    if ($minutes < 60) {
-        $time_ago = $minutes . "m ago";
-    } elseif ($minutes < 1440) {
-        $time_ago = floor($minutes / 60) . "h ago";
+    if ($ordersQuery) {
+        while ($row = mysqli_fetch_assoc($ordersQuery)) {
+            // Calculate time ago
+            $orderTime = strtotime($row['order_date']);
+            $diff = time() - $orderTime;
+            
+            if ($diff < 60) {
+                $timeAgo = "Just now";
+            } elseif ($diff < 3600) {
+                $timeAgo = floor($diff / 60) . "m ago";
+            } elseif ($diff < 86400) {
+                $timeAgo = floor($diff / 3600) . "h ago";
+            } else {
+                $timeAgo = floor($diff / 86400) . "d ago";
+            }
+            
+            $customers[] = [
+                "user_id" => (int)$row['user_id'],
+                "name" => $row['name'] ?? "Customer",
+                "profile_image" => $row['profile_image'] ?? "",
+                "last_message" => "Click to open chat",
+                "last_message_time" => $timeAgo,
+                "time_ago" => $timeAgo
+            ];
+        }
+        error_log("baker-message-customers: Found " . count($customers) . " customers from orders");
     } else {
-        $time_ago = floor($minutes / 1440) . "d ago";
+        error_log("baker-message-customers: Orders query error: " . mysqli_error($conn));
     }
-    
-    // Truncate last message for preview
-    $last_message = $lastMsg['message'] ?? "Sent an image";
-    if (strlen($last_message) > 50) {
-        $last_message = substr($last_message, 0, 47) . "...";
-    }
-    
-    $customers[] = [
-        "user_id" => (int)$row['user_id'],
-        "name" => $row['name'] ?? "Customer",
-        "profile_image" => "",
-        "last_message" => $last_message,
-        "last_message_time" => $lastMsg['created_at'] ?? "",
-        "time_ago" => $time_ago
-    ];
 }
 
 echo json_encode([
     "status" => "success",
     "customers" => $customers
 ]);
+
+mysqli_close($conn);
 ?>

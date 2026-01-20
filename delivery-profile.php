@@ -71,6 +71,7 @@ echo json_encode([
     "month_earnings" => (float)$monthEarnings,
     "rating" => (float)$rating,
     "created_at" => $delivery['created_at'] ?? null,
-    "license_image" => $delivery['license_image'] ?? null
+    "license_image" => $delivery['license_image'] ?? null,
+    "license_verified" => isset($delivery['license_verified']) ? (bool)$delivery['license_verified'] : false
 ]);
 ?>

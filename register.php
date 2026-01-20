@@ -4,7 +4,17 @@ header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST");
 header("Access-Control-Allow-Headers: Content-Type");
 
+// Suppress PHP warnings
+error_reporting(0);
+ini_set('display_errors', 0);
+
 include "db.php";
+
+// Check database connection
+if (!isset($conn) || $conn->connect_error) {
+    echo json_encode(["status" => "error", "message" => "Database connection failed"]);
+    exit;
+}
 
 // Accept JSON input
 $data = json_decode(file_get_contents("php://input"), true);
@@ -22,31 +32,45 @@ if (empty($data['name']) || empty($data['email']) || empty($data['password'])) {
     exit;
 }
 
-$name = mysqli_real_escape_string($conn, $data['name']);
-$email = mysqli_real_escape_string($conn, $data['email']);
-$phone = mysqli_real_escape_string($conn, $data['phone'] ?? '');
-$address = mysqli_real_escape_string($conn, $data['address'] ?? '');
+$name = trim($data['name']);
+$email = trim($data['email']);
+$phone = trim($data['phone'] ?? '');
+$address = trim($data['address'] ?? '');
 $password = $data['password'];
 
-// Email already exists check
-$check = mysqli_query($conn, "SELECT user_id FROM users WHERE email='$email'");
-if ($check && mysqli_num_rows($check) > 0) {
+// Check if email already exists using prepared statement
+$check_stmt = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
+if (!$check_stmt) {
+    echo json_encode(["status" => "error", "message" => "Query error"]);
+    exit;
+}
+
+$check_stmt->bind_param("s", $email);
+$check_stmt->execute();
+$result = $check_stmt->get_result();
+
+if ($result->num_rows > 0) {
     echo json_encode([
         "status" => "error",
-        "message" => "Email already exists"
+        "message" => "Email already registered"
     ]);
     exit;
 }
 
 // Hash password
-$hash = password_hash($password, PASSWORD_DEFAULT);
+$hashed_password = password_hash($password, PASSWORD_DEFAULT);
 
-// Insert customer
-$sql = "INSERT INTO users (name, email, phone, address, password) 
-        VALUES ('$name', '$email', '$phone', '$address', '$hash')";
+// Insert new user using prepared statement
+$insert_stmt = $conn->prepare("INSERT INTO users (name, email, phone, address, password) VALUES (?, ?, ?, ?, ?)");
+if (!$insert_stmt) {
+    echo json_encode(["status" => "error", "message" => "Insert error: " . $conn->error]);
+    exit;
+}
 
-if (mysqli_query($conn, $sql)) {
-    $user_id = mysqli_insert_id($conn);
+$insert_stmt->bind_param("sssss", $name, $email, $phone, $address, $hashed_password);
+
+if ($insert_stmt->execute()) {
+    $user_id = $conn->insert_id;
     echo json_encode([
         "status" => "success",
         "message" => "Registration successful",
@@ -55,9 +79,9 @@ if (mysqli_query($conn, $sql)) {
 } else {
     echo json_encode([
         "status" => "error",
-        "message" => "Registration failed: " . mysqli_error($conn)
+        "message" => "Registration failed: " . $insert_stmt->error
     ]);
 }
 
-mysqli_close($conn);
+$conn->close();
 ?>

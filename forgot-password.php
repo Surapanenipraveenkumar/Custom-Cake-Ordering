@@ -1,14 +1,20 @@
 <?php
-// Suppress PHP warnings/notices from breaking JSON output
-error_reporting(0);
-ini_set('display_errors', 0);
-
 header("Content-Type: application/json");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST");
 header("Access-Control-Allow-Headers: Content-Type");
 
+// Suppress PHP warnings/notices from breaking JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
+
 include 'db.php';
+
+// Check database connection
+if (!isset($conn) || $conn->connect_error) {
+    echo json_encode(["status" => "error", "message" => "Database connection failed"]);
+    exit;
+}
 
 // Get JSON input
 $json = file_get_contents("php://input");
@@ -19,7 +25,7 @@ if (!$data) {
     exit;
 }
 
-$email = mysqli_real_escape_string($conn, $data['email'] ?? '');
+$email = trim($data['email'] ?? '');
 $user_type = $data['user_type'] ?? 'customer';
 $action = $data['action'] ?? 'verify';
 $new_password = $data['new_password'] ?? '';
@@ -29,19 +35,16 @@ if (empty($email)) {
     exit;
 }
 
-// Determine table based on user type
-$table = '';
-$id_column = '';
-
+// Determine table and ID column based on user type
 switch ($user_type) {
     case 'baker':
         $table = 'bakers';
         $id_column = 'baker_id';
         break;
     case 'delivery':
-        // Check which table exists for delivery
-        $check_dp = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
-        if ($check_dp && mysqli_num_rows($check_dp) > 0) {
+        // Check which table exists
+        $check_table = $conn->query("SHOW TABLES LIKE 'delivery_partners'");
+        if ($check_table && $check_table->num_rows > 0) {
             $table = 'delivery_partners';
         } else {
             $table = 'delivery_persons';
@@ -53,39 +56,23 @@ switch ($user_type) {
         $id_column = 'user_id';
 }
 
-// Verify email exists - try different column names
-$user = null;
-$found = false;
-
-// Try primary id column first
-$check = mysqli_query($conn, "SELECT * FROM $table WHERE email = '$email' LIMIT 1");
-if ($check && mysqli_num_rows($check) > 0) {
-    $user = mysqli_fetch_assoc($check);
-    $found = true;
-}
-
-// If not found and it's users table, try with 'id' column
-if (!$found && $table == 'users') {
-    // Check if user_id column exists
-    $col_check = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'user_id'");
-    if (!$col_check || mysqli_num_rows($col_check) == 0) {
-        $id_column = 'id';
-    }
-    
-    $check = mysqli_query($conn, "SELECT * FROM users WHERE email = '$email' LIMIT 1");
-    if ($check && mysqli_num_rows($check) > 0) {
-        $user = mysqli_fetch_assoc($check);
-        $found = true;
-    }
-}
-
-if (!$found || !$user) {
-    echo json_encode(["status" => "error", "message" => "Email not registered in $user_type accounts"]);
+// Verify email exists using prepared statement (same style as login.php)
+$stmt = $conn->prepare("SELECT * FROM $table WHERE email = ?");
+if (!$stmt) {
+    echo json_encode(["status" => "error", "message" => "Query error: " . $conn->error]);
     exit;
 }
 
-// Get user ID from the found record
-$user_id = $user[$id_column] ?? $user['id'] ?? $user['user_id'] ?? 0;
+$stmt->bind_param("s", $email);
+$stmt->execute();
+$result = $stmt->get_result();
+
+if ($result->num_rows == 0) {
+    echo json_encode(["status" => "error", "message" => "Email not registered"]);
+    exit;
+}
+
+$user = $result->fetch_assoc();
 
 if ($action === 'verify') {
     // Just verify email exists
@@ -93,7 +80,10 @@ if ($action === 'verify') {
         "status" => "success",
         "message" => "Email verified"
     ]);
-} elseif ($action === 'reset') {
+    exit;
+} 
+
+if ($action === 'reset') {
     // Reset password
     if (empty($new_password)) {
         echo json_encode(["status" => "error", "message" => "New password is required"]);
@@ -108,10 +98,16 @@ if ($action === 'verify') {
     // Hash the password using password_hash (matches password_verify in login)
     $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
     
-    // Update password - use email since we're sure of it
-    $update = mysqli_query($conn, "UPDATE $table SET password = '$hashed_password' WHERE email = '$email'");
+    // Update password using prepared statement
+    $update_stmt = $conn->prepare("UPDATE $table SET password = ? WHERE email = ?");
+    if (!$update_stmt) {
+        echo json_encode(["status" => "error", "message" => "Update error: " . $conn->error]);
+        exit;
+    }
     
-    if ($update && mysqli_affected_rows($conn) > 0) {
+    $update_stmt->bind_param("ss", $hashed_password, $email);
+    
+    if ($update_stmt->execute() && $update_stmt->affected_rows > 0) {
         echo json_encode([
             "status" => "success",
             "message" => "Password reset successful"
@@ -122,9 +118,9 @@ if ($action === 'verify') {
             "message" => "Failed to reset password"
         ]);
     }
-} else {
-    echo json_encode(["status" => "error", "message" => "Invalid action"]);
+    exit;
 }
 
-mysqli_close($conn);
+echo json_encode(["status" => "error", "message" => "Invalid action"]);
+$conn->close();
 ?>

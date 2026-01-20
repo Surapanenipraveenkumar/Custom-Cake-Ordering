@@ -25,7 +25,6 @@ $query = mysqli_query($conn, "
 ");
 
 $bakers = [];
-
 if ($query) {
     while ($row = mysqli_fetch_assoc($query)) {
         $timeAgo = "";

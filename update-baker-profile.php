@@ -30,6 +30,8 @@ $phone = mysqli_real_escape_string($conn, $data['phone'] ?? '');
 $address = mysqli_real_escape_string($conn, $data['address'] ?? '');
 $specialty = mysqli_real_escape_string($conn, $data['specialty'] ?? '');
 $description = mysqli_real_escape_string($conn, $data['description'] ?? '');
+$latitude = floatval($data['latitude'] ?? 0);
+$longitude = floatval($data['longitude'] ?? 0);
 
 // Validate required fields
 if (empty($shop_name)) {
@@ -47,7 +49,7 @@ if (empty($phone)) {
     exit;
 }
 
-// Update baker profile
+// Update baker profile with location
 $sql = "UPDATE bakers SET 
     shop_name = '$shop_name',
     owner_name = '$owner_name',
@@ -55,7 +57,9 @@ $sql = "UPDATE bakers SET
     phone = '$phone',
     address = '$address',
     specialty = '$specialty',
-    description = '$description'
+    description = '$description',
+    latitude = $latitude,
+    longitude = $longitude
     WHERE baker_id = $baker_id";
 
 if (mysqli_query($conn, $sql)) {

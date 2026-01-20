@@ -64,9 +64,10 @@ $payment_method = mysqli_real_escape_string($conn, $data['payment_method'] ?? 'o
 
 error_log("place-order.php: user_id=$user_id");
 
-// Get cart items
+// Get cart items WITH customization options
 $cartQ = mysqli_query($conn, "
     SELECT cart.cart_id, cart.cake_id, cart.quantity,
+           cart.weight, cart.shape, cart.color, cart.flavor, cart.toppings,
            cakes.cake_name, cakes.price, cakes.baker_id, cakes.image
     FROM cart
     JOIN cakes ON cart.cake_id = cakes.cake_id
@@ -95,13 +96,23 @@ while ($row = mysqli_fetch_assoc($cartQ)) {
     $subtotal += $item_total;
     $baker_id = intval($row['baker_id']);
     
+    // Build customization options string
+    $custom_parts = [];
+    if (!empty($row['weight'])) $custom_parts[] = "Weight: " . $row['weight'];
+    if (!empty($row['shape'])) $custom_parts[] = "Shape: " . $row['shape'];
+    if (!empty($row['color'])) $custom_parts[] = "Color: " . $row['color'];
+    if (!empty($row['flavor'])) $custom_parts[] = "Flavor: " . $row['flavor'];
+    if (!empty($row['toppings'])) $custom_parts[] = "Toppings: " . $row['toppings'];
+    $custom_options = implode(", ", $custom_parts);
+    
     $items[] = [
         "cake_id" => intval($row['cake_id']),
         "cake_name" => $row['cake_name'],
         "price" => floatval($row['price']),
         "quantity" => intval($row['quantity']),
         "image" => $row['image'],
-        "item_total" => $item_total
+        "item_total" => $item_total,
+        "custom_options" => $custom_options
     ];
 }
 
@@ -121,11 +132,18 @@ $order_id = mysqli_insert_id($conn);
 $order_id_str = "ORD" . str_pad($order_id, 8, "0", STR_PAD_LEFT);
 error_log("place-order.php: Order created: $order_id");
 
-// Insert order items if table exists
+// Insert order items if table exists (with custom_options)
 $table_check = mysqli_query($conn, "SHOW TABLES LIKE 'order_items'");
 if ($table_check && mysqli_num_rows($table_check) > 0) {
+    // Ensure custom_options column exists
+    $col_check = mysqli_query($conn, "SHOW COLUMNS FROM order_items LIKE 'custom_options'");
+    if (!$col_check || mysqli_num_rows($col_check) == 0) {
+        mysqli_query($conn, "ALTER TABLE order_items ADD COLUMN custom_options TEXT NULL");
+    }
+    
     foreach ($items as $item) {
-        mysqli_query($conn, "INSERT INTO order_items (order_id, cake_id, quantity, price) VALUES ($order_id, {$item['cake_id']}, {$item['quantity']}, {$item['price']})");
+        $custom_opt = mysqli_real_escape_string($conn, $item['custom_options'] ?? '');
+        mysqli_query($conn, "INSERT INTO order_items (order_id, cake_id, quantity, price, custom_options) VALUES ($order_id, {$item['cake_id']}, {$item['quantity']}, {$item['price']}, '$custom_opt')");
     }
 }
 

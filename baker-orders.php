@@ -64,12 +64,14 @@ while ($row = mysqli_fetch_assoc($query)) {
     
     // Check if order_items table exists and has data for this order
     $items_query = mysqli_query($conn, "
-        SELECT oi.cake_id, oi.quantity, oi.price, c.cake_name, c.image as cake_image
+        SELECT oi.cake_id, oi.quantity, oi.price, oi.custom_options, c.cake_name, c.image as cake_image
         FROM order_items oi
         LEFT JOIN cakes c ON oi.cake_id = c.cake_id
         WHERE oi.order_id = $order_id
         LIMIT 1
     ");
+    
+    $custom_options = "";
     
     if ($items_query && mysqli_num_rows($items_query) > 0) {
         $item = mysqli_fetch_assoc($items_query);
@@ -78,6 +80,7 @@ while ($row = mysqli_fetch_assoc($query)) {
         $cake_image = $item['cake_image'] ?? "";
         $price = (float)$item['price'];
         $quantity = (int)$item['quantity'];
+        $custom_options = $item['custom_options'] ?? "";
     } else {
         // Fallback: Get any cake from this baker to show info
         $cake_query = mysqli_query($conn, "
@@ -111,7 +114,8 @@ while ($row = mysqli_fetch_assoc($query)) {
         "delivery_time" => $row['delivery_time'] ?? "",
         "payment_method" => $row['payment_method'] ?? "",
         "status" => $row['status'] ?? "pending",
-        "total_amount" => (float)$row['total_amount']
+        "total_amount" => (float)$row['total_amount'],
+        "custom_options" => $custom_options
     ];
 }
 

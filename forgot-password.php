@@ -30,13 +30,22 @@ if (empty($email)) {
 }
 
 // Determine table based on user type
+$table = '';
+$id_column = '';
+
 switch ($user_type) {
     case 'baker':
         $table = 'bakers';
         $id_column = 'baker_id';
         break;
     case 'delivery':
-        $table = 'delivery_persons';
+        // Check which table exists for delivery
+        $check_dp = mysqli_query($conn, "SHOW TABLES LIKE 'delivery_partners'");
+        if ($check_dp && mysqli_num_rows($check_dp) > 0) {
+            $table = 'delivery_partners';
+        } else {
+            $table = 'delivery_persons';
+        }
         $id_column = 'delivery_id';
         break;
     default:
@@ -44,24 +53,39 @@ switch ($user_type) {
         $id_column = 'user_id';
 }
 
-// Verify email exists
-$check = mysqli_query($conn, "SELECT $id_column, email FROM $table WHERE email = '$email'");
+// Verify email exists - try different column names
+$user = null;
+$found = false;
 
-if (!$check || mysqli_num_rows($check) == 0) {
-    // Try with 'id' column for users table
-    if ($table == 'users') {
-        $check = mysqli_query($conn, "SELECT id, email FROM $table WHERE email = '$email'");
+// Try primary id column first
+$check = mysqli_query($conn, "SELECT * FROM $table WHERE email = '$email' LIMIT 1");
+if ($check && mysqli_num_rows($check) > 0) {
+    $user = mysqli_fetch_assoc($check);
+    $found = true;
+}
+
+// If not found and it's users table, try with 'id' column
+if (!$found && $table == 'users') {
+    // Check if user_id column exists
+    $col_check = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'user_id'");
+    if (!$col_check || mysqli_num_rows($col_check) == 0) {
         $id_column = 'id';
     }
     
-    if (!$check || mysqli_num_rows($check) == 0) {
-        echo json_encode(["status" => "error", "message" => "Email not registered"]);
-        exit;
+    $check = mysqli_query($conn, "SELECT * FROM users WHERE email = '$email' LIMIT 1");
+    if ($check && mysqli_num_rows($check) > 0) {
+        $user = mysqli_fetch_assoc($check);
+        $found = true;
     }
 }
 
-$user = mysqli_fetch_assoc($check);
-$user_id = $user[$id_column];
+if (!$found || !$user) {
+    echo json_encode(["status" => "error", "message" => "Email not registered in $user_type accounts"]);
+    exit;
+}
+
+// Get user ID from the found record
+$user_id = $user[$id_column] ?? $user['id'] ?? $user['user_id'] ?? 0;
 
 if ($action === 'verify') {
     // Just verify email exists
@@ -84,10 +108,10 @@ if ($action === 'verify') {
     // Hash the password using password_hash (matches password_verify in login)
     $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
     
-    // Update password
-    $update = mysqli_query($conn, "UPDATE $table SET password = '$hashed_password' WHERE $id_column = $user_id");
+    // Update password - use email since we're sure of it
+    $update = mysqli_query($conn, "UPDATE $table SET password = '$hashed_password' WHERE email = '$email'");
     
-    if ($update) {
+    if ($update && mysqli_affected_rows($conn) > 0) {
         echo json_encode([
             "status" => "success",
             "message" => "Password reset successful"
@@ -95,7 +119,7 @@ if ($action === 'verify') {
     } else {
         echo json_encode([
             "status" => "error",
-            "message" => "Failed to reset password: " . mysqli_error($conn)
+            "message" => "Failed to reset password"
         ]);
     }
 } else {
